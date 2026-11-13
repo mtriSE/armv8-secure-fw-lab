@@ -1,0 +1,46 @@
+# ---- Build artifacts ----
+build/
+out/
+*.o
+*.obj
+*.a
+*.d
+*.elf
+*.bin
+*.hex
+*.img
+*.map
+*.lst
+*.dis
+*.dtb
+
+# ---- Debugging / QEMU ----
+.gdb_history
+core
+core.*
+*.log
+*.qcow2
+*.trace
+
+# ---- Editor / OS / tooling ----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.cache/
+compile_commands.json
+.DS_Store
+
+# ---- AI assistant artifacts ----
+.claude/
+.specify/
+CLAUDE.local.md
+.cursor/
+.cursorrules
+.aider*
+.continue/
+.windsurf/
+.codex/
+.gemini/
+.github/copilot-instructions.md
