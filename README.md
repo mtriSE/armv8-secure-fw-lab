@@ -36,9 +36,20 @@ libraries. Each milestone adds one layer.
 | A1 | `start.S`, linker script, Makefile | Reset entry, stack setup, clearing BSS, jumping to C `main()` |
 | A2 | PL011 UART driver (polling) | MMIO with `volatile`, `uart_putc` / `uart_puts`, a minimal `printf` |
 | A3 | EL3 vector table and exception handler | Exception model; reading `ESR_EL3`, `ELR_EL3`, `FAR_EL3`; deliberate faults |
-| A4 | EL3 → EL1 with `eret`, then `smc` back to EL3 | Exception levels, SMCCC (function ID in `x0`, args in `x1`–`x3`), returning a result |
-| A5 | MMU at EL1 with hand-written translation tables | Page tables, Device vs. Normal memory attributes |
-| A6 | GIC (v2/v3) and generic timer | Interrupt routing, periodic timer interrupts |
+| A4 | EL3 → EL1 with `eret` (first Secure EL1, then Non-secure EL1 via `SCR_EL3.NS`), then `smc` back to EL3 | Exception levels, secure/non-secure world switch, SMCCC (function ID in `x0`, args in `x1`–`x3`), returning a result |
+| A5 | MMU at Non-secure EL1 with hand-written translation tables | Page tables, Device vs. Normal memory attributes |
+| A6 | GICv3 and generic timer (one PPI) | Interrupt routing, periodic timer interrupts |
+
+Design decisions for Part A:
+
+- The final payload runs in **Non-secure EL1**, like BL31 handing over to
+  BL33/Linux in Part B. The EL3 firmware lives in Secure RAM and the payload in
+  Non-secure RAM, so the A1 linker script reserves both regions.
+- The interrupt controller is **GICv3** (`-M virt,secure=on,gic-version=3`),
+  using the `ICC_*` system registers, not the GICv2 MMIO CPU interface.
+- Every milestone has an automated check: a GDB batch script for A1, and
+  UART-output pattern checks for A2–A6 (no word-for-word diffs).
+  The first GDB session of each milestone is still done by hand.
 
 ### Part B: Secure Key Vault (later)
 
@@ -127,8 +138,11 @@ Part B additionally needs Docker.
 make            # build the firmware ELF/binary
 make run        # run on QEMU, serial output on the terminal
 make debug      # run on QEMU paused, waiting for GDB (-s -S)
+make test       # run the checks of all finished milestones (regression check)
 make clean
 ```
+
+`make test` will also support repeating the run 10 times to catch flaky results.
 
 Debugging with GDB (from A1 onward):
 
@@ -151,6 +165,19 @@ Leave QEMU with `Ctrl-A` then `X` when using `-nographic`.
   (`uint32_t`, ...), register definitions in headers
 - Code comments in English
 - One clear commit per finished milestone
+
+## Working with third-party code (Part B)
+
+- **No upstream source is copied into this repository.** TF-A, OP-TEE and Linux
+  are tracked as git submodules, or as a patch series (`git format-patch`)
+  with a script that clones upstream and applies the patches. This keeps the
+  repository small and keeps the original licenses intact. It also matches the
+  real BSP workflow: track upstream updates and merge them into the BSP.
+- **License headers:** when changing a TF-A or OP-TEE file, keep the original
+  header. Add a copyright line only for a significant change.
+- **Keys:** secure-boot keys here are **test keys only**, named clearly (for
+  example `test-keys/`). Preferably a script generates them, and **no private
+  key is ever committed**.
 
 ## License
 
