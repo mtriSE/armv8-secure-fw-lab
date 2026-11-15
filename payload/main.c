@@ -12,15 +12,10 @@
 
 static int failures;
 
-static void check(int ok)
+const char *payload_ok(int ok)
 {
     if (!ok)
         failures++;
-}
-
-static const char *ok_str(int ok)
-{
-    check(ok);
     return ok ? "OK" : "BAD";
 }
 
@@ -38,12 +33,12 @@ static void probe_secure_ram(const char *w, int world)
 
     if (world == WORLD_SECURE) {
         printf("A4: [%s] read secure RAM %p: val=0x%lx %s\n", w,
-               (void *)SECURE_RAM_BASE, v, ok_str(!rec.taken && v == 0x1234));
+               (void *)SECURE_RAM_BASE, v, payload_ok(!rec.taken && v == 0x1234));
     } else {
         uint64_t iss = ESR_ISS(rec.esr);
         printf("A4: [%s] read secure RAM %p: fault EC=0x%lx DFSC=0x%lx FAR=0x%lx %s\n",
                w, (void *)SECURE_RAM_BASE, ESR_EC(rec.esr), ISS_DFSC(iss), rec.far,
-               ok_str(rec.taken && ESR_EC(rec.esr) == EC_DABT_CUR &&
+               payload_ok(rec.taken && ESR_EC(rec.esr) == EC_DABT_CUR &&
                       rec.far == SECURE_RAM_BASE));
     }
 }
@@ -59,13 +54,17 @@ void payload_main(void)
            world == WORLD_SECURE ? "secure" : "non-secure");
 
     r = smc_call(SMCCC_VERSION, 0, 0, 0);
-    printf("A4: [%s] smc SMCCC_VERSION=0x%lx %s\n", w, r, ok_str(r == SMCCC_VERSION_1_1));
+    printf("A4: [%s] smc SMCCC_VERSION=0x%lx %s\n", w, r, payload_ok(r == SMCCC_VERSION_1_1));
     r = smc_call(SIP_ADD, 1, 2, 3);
-    printf("A4: [%s] smc ADD(1,2,3)=%lu %s\n", w, r, ok_str(r == 6));
+    printf("A4: [%s] smc ADD(1,2,3)=%lu %s\n", w, r, payload_ok(r == 6));
     r = smc_call(SIP_FID(0x77), 0, 0, 0);
-    printf("A4: [%s] smc unknown=0x%lx %s\n", w, r, ok_str(r == SMCCC_UNKNOWN));
+    printf("A4: [%s] smc unknown=0x%lx %s\n", w, r, payload_ok(r == SMCCC_UNKNOWN));
 
     probe_secure_ram(w, (int)world);
+
+    /* The rest only runs in the Normal world, like a rich OS would. */
+    if (world == WORLD_NONSECURE)
+        a5_run();
 
     smc_call(SIP_DONE, (uint64_t)failures, 0, 0);   /* does not return */
 }

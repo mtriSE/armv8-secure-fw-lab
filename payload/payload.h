@@ -12,4 +12,9 @@ static inline uint64_t load64(uint64_t addr)
 }
 
 void irq_handler(void);
+
+/* Count a failed check (reported to EL3 in SIP_DONE); returns "OK"/"BAD". */
+const char *payload_ok(int ok);
+
+void a5_run(void);
 #endif

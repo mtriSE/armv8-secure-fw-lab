@@ -11,7 +11,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 | A2 | PL011 UART driver and minimal printf | [x] |
 | A3 | EL3 vector table and exception handler | [x] |
 | A4 | EL3 to EL1 (`eret`), `smc` back to EL3 | [x] |
-| A5 | MMU at Non-secure EL1 | [ ] |
+| A5 | MMU at Non-secure EL1 | [x] |
 | A6 | GICv3 and generic timer | [ ] |
 
 ## Hardware facts to verify
@@ -210,18 +210,36 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 **Goal:** hand-written translation tables, Device vs Normal memory attributes.
 
 ### What was built
--
+- `payload/mmu.c`: one level-1 table (4 entries, 1GB blocks), 4KB granule, T0SZ=32 (32-bit VA, so the walk starts at level 1), TTBR1 walks disabled (EPD1).
+
+  | VA | PA | Type |
+  |---|---|---|
+  | 0x0000_0000 | 0x0000_0000 | Device-nGnRnE, PXN+UXN (UART, GIC) |
+  | 0x4000_0000 | 0x4000_0000 | Normal WB, inner shareable (payload) |
+  | 0x8000_0000 | — | invalid (fault test) |
+  | 0xC000_0000 | 0x4000_0000 | alias of the RAM block |
+- Enable sequence: write table, `dsb sy`; MAIR/TCR/TTBR0, `isb`; `tlbi vmalle1; dsb nsh; isb`; SCTLR_EL1 |= M|C|I; `isb`.
+- `payload/a5.c` checks, run only in the Non-secure world.
 
 ### Key concepts
--
+- MAIR_EL1 holds up to 8 memory types (attr0 = 0x00 Device-nGnRnE, attr1 = 0xff Normal write-back RW-allocate); a descriptor picks one with AttrIndx[4:2].
+- Block descriptor: bits[1:0]=01, AttrIndx, AP[7:6] (00 = EL1 RW), SH[9:8], **AF[10]** (must be 1, or the first access faults), PXN[53]/UXN[54], output address.
+- Device vs Normal: the same unaligned 8-byte load faults with the MMU off (everything is Device, DFSC 0x21) and works once RAM is mapped Normal (SCTLR_EL1.A = 0). Closes the loop from A2/A3.
+- Device regions are marked execute-never: speculative instruction fetches must never touch devices.
+- Translation fault on a missing descriptor: DFSC 0x05 = level 1 (the level where the walk stopped).
+- `isb` after SCTLR write: the next instruction is fetched through the MMU; identity mapping of the running code is what makes that safe.
+- TLB invalidate before enabling: EL1 translation state is shared between worlds (A4), so stale entries from the Secure run must not be used.
+- Tables were written with caches off, so they are in memory when the walker (configured cacheable, IRGN/ORGN=WBWA) reads them.
 
 ### Bugs and debugging
 | Symptom | Cause | How it was found |
 |---------|-------|------------------|
-| | | |
+| (break test) no output after "before MMU", QEMU spins until timeout | AF=0: first instruction fetch after enabling the MMU → instruction abort EC 0x21, IFSC 0x09 (access flag, level 1); the EL1 vectors are in the same block, so the handler fetch faults too (~422k exceptions in 3 s) | `-d int`: `ESR 0x21/0x86000009` repeating |
+| `test_a5.sh` regex never matched the alias line | `0xc$H` with `H='0x[0-9a-f]+'` doubles the `0x` | test output vs pattern |
 
 ### Verification
--
+- `make test`: A1–A5 PASS. Output: `SCTLR_EL1=0x30d01805` (M, C, I set), `TCR_EL1=0x803520`, `MAIR_EL1=0xff00`; alias `0xc0003010 -> 0x40003010` reads the value written through the identity mapping; `0x80000000` faults with DFSC 0x5, FAR 0x80000000.
+- Break tests: AF cleared → silent exception storm (above), test FAILs; RAM attr changed to Device in MAIR → unaligned load still faults after MMU on, test FAILs.
 
 ---
 
