@@ -1,5 +1,6 @@
 #include "uart.h"
 #include "printf.h"
+#include "a3_tests.h"
 
 #include <stdint.h>
 
@@ -38,6 +39,8 @@ int main(void)
 
     bss_probe = data_probe + 1;   /* expect 0x1235 */
     printf("A2: done\n");
+
+    a3_run_tests();
     for (;;)
         __asm__ volatile("wfe");
 }

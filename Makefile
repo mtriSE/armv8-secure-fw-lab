@@ -7,7 +7,7 @@ BUILD := build
 # -mgeneral-regs-only: no FP/SIMD registers. Variadic functions (printf) would
 # otherwise save q0-q7 in their prologue, which faults if FP access is trapped.
 CFLAGS  := -mcpu=cortex-a53 -mgeneral-regs-only -ffreestanding -nostdlib -fno-pic -O0 -g -Wall -Wextra -Iinclude
-ASFLAGS := -mcpu=cortex-a53 -g
+ASFLAGS := -mcpu=cortex-a53 -g -Iinclude
 LDFLAGS := -nostdlib -static -T linker/link.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SRCS_C := $(wildcard src/*.c)
@@ -45,6 +45,7 @@ test: all
 	@rc=0; \
 	scripts/test_a1.sh || rc=1; \
 	scripts/test_a2.sh || rc=1; \
+	scripts/test_a3.sh || rc=1; \
 	exit $$rc
 
 clean:

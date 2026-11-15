@@ -28,7 +28,12 @@ _start:
     stp     xzr, xzr, [x0], #16
     b       3b
 
-4:  bl      main
+    /* Install the EL3 vector table before running any C code, so a fault
+     * is reported instead of jumping to an unknown VBAR_EL3. */
+4:  ldr     x0, =el3_vectors
+    msr     vbar_el3, x0
+    isb
+    bl      main
 park:
     wfe
     b       park

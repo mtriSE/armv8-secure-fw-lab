@@ -9,7 +9,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 |---|-----------|--------|
 | A1 | `start.S`, linker script, Makefile | [x] |
 | A2 | PL011 UART driver and minimal printf | [x] |
-| A3 | EL3 vector table and exception handler | [ ] |
+| A3 | EL3 vector table and exception handler | [x] |
 | A4 | EL3 to EL1 (`eret`), `smc` back to EL3 | [ ] |
 | A5 | MMU at Non-secure EL1 | [ ] |
 | A6 | GICv3 and generic timer | [ ] |
@@ -32,6 +32,10 @@ Fill in the value, the source, and the date once verified. Do not use unverified
 | GICv3 redistributor base | 0x080a_0000 | `dumpdtb` intc reg | yes |
 | Reset state with `secure=on` | EL3h (PSTATE=0x400003cd), PC from loaded image | `-d cpu_reset` | yes |
 | Secure flash0 | 0x0000_0000, 64M | `dumpdtb`, `-bios` boot test | yes |
+| Unmapped hole (secure AS) used as bad address | 0x0b00_0000 (between virtio-mmio end 0x0a00_3fff and secure RAM 0x0e00_0000); load gives sync external abort, DFSC 0x10 | `info mtree -f`, A3 fault test | yes |
+| `VBAR_EL3` reset value | 0 in QEMU (architecturally UNKNOWN) | `-d int`: unhandled `brk` goes to PC 0x200 | yes |
+| `VBAR_EL3` low bits | QEMU keeps bits [10:0] (a table at 0x1180 still works); hardware treats them as RES0 | A3 `.align 7` experiment | yes |
+| `SCTLR_EL3` at reset | 0x00c50838: M=0, A=0, C=0, SA=1, I=0 | printed by A3 | yes |
 | Generic timer PPI INTID (NS EL1 physical timer) | DT `timer` interrupts list `0x0d, 0x0e, 0x0b, 0x0a`; confirm which is NS EL1 phys (expected 30) in A6 | `dumpdtb` | partly |
 
 ## Memory map (final design)
@@ -128,18 +132,41 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 **Goal:** install `VBAR_EL3`, catch exceptions, print `ESR_EL3`, `ELR_EL3`, `FAR_EL3`.
 
 ### What was built
--
+- `src/vectors.S`: 16-entry table (`.align 11`, entries `.align 7`). Each entry reserves a trap frame, saves x0/x1, puts the entry number in x0 and branches to common code that saves x2-x30, `ELR_EL3`, `SPSR_EL3`, calls `el3_exception_handler(vec, frame)`, restores (ELR/SPSR from the frame) and `eret`s.
+- `include/exception.h`: trap frame offsets shared by asm and C (`_Static_assert` checks them), ESR field macros, EC values.
+- `src/exception.c`: expected-fault path (record ESR/ELR/FAR, `elr += 4`, return) and panic path (decode, dump x0-x30, halt).
+- `src/start.S` installs `VBAR_EL3` after BSS clear, before `bl main`.
+- `src/a3_tests.c`: `brk`, `udf`, load from an unmapped address, unaligned load; each compares ELR with the faulting instruction address (`adr` of a local label).
+- `include/sysreg.h`: `read_sysreg` / `write_sysreg` macros (`mrs`/`msr` need the register name inside the instruction).
 
 ### Key concepts
--
+- Exception entry (hardware): PSTATE → SPSR, preferred return address → ELR, syndrome → ESR (+FAR for aborts), DAIF masked, SPSel=1, PC = VBAR + offset. x0-x30 are **not** saved; software does that.
+- Preferred return address: the faulting instruction for aborts/`brk`/`udf`; the next instruction for `svc`/`hvc`/`smc`.
+- Vector offset = source group (cur SP0 / cur SPx / lower A64 / lower A32) × 0x200 + type (sync/IRQ/FIQ/SError) × 0x80. EL3h code faults land at 0x200; `smc` from EL1 at 0x400.
+- ESR: EC [31:26], IL [25], ISS [24:0]. For data aborts ISS[5:0] = DFSC, ISS[6] = WnR. FAR is UNKNOWN for `brk`/`udf`.
+- With the MMU off every data access is Device memory, so an unaligned access faults (DFSC 0x21) even though `SCTLR_EL3.A` = 0.
+- Only general registers are saved because everything is built with `-mgeneral-regs-only` (A2).
+- Trap frame is 272 bytes (one padding slot) because SP must stay 16-byte aligned (`SCTLR_EL3.SA` = 1).
 
 ### Bugs and debugging
 | Symptom | Cause | How it was found |
 |---------|-------|------------------|
-| | | |
+| No output, ~17k identical `Breakpoint` exceptions in 3 s (pre-A3 firmware + `brk`) | `VBAR_EL3` = 0, so the "handler" at 0x200 is the middle of `main`, which runs into the `brk` again | `-d int -D log`: `...to EL3 PC 0x200`; `objdump` shows 0x200 inside `main` |
+| Misaligned table (`.align 7`, VBAR=0x1180) still worked in QEMU | QEMU does not ignore VBAR bits [10:0]; real hardware would | A3 printed `VBAR_EL3=0x1180`; added an explicit 2KB check to `test_a3.sh` |
+| Panic dump missing when piping `qemu ... -serial stdio` through `timeout` in an ad-hoc shell command | pipe/`timeout` interaction in the experiment, not the firmware | `-serial file:` showed the full dump |
 
 ### Verification
-- Deliberate faults tried:
+- Deliberate faults tried (QEMU 10.0.13):
+
+  | Fault | ESR_EL3 | EC | ISS | FAR |
+  |---|---|---|---|---|
+  | `brk #0x42` | 0xf2000042 | 0x3c | 0x42 (imm16) | UNKNOWN |
+  | `udf #0` | 0x02000000 | 0x00 | 0 | UNKNOWN |
+  | load from 0x0b000000 | 0x96000010 | 0x25 | DFSC 0x10 sync external abort | 0xb000000 |
+  | unaligned 8-byte load | 0x96000021 | 0x25 | DFSC 0x21 alignment | address+1 |
+  | store to 0x0b000000 (panic) | 0x96000050 | 0x25 | WnR=1, DFSC 0x10 | 0xb000000 |
+- `make test`: A1, A2, A3 PASS. `test_a3.sh` matches regex lines, checks `el3_vectors` is 2KB aligned and that no panic dump appears.
+- Break tests: no `elr += 4` → panic on the second `brk` (expected record already cleared); no `msr vbar_el3` → output stops; `.align 7` → only the alignment check fails.
 
 ---
 
