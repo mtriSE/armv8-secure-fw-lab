@@ -11,14 +11,16 @@ This project is also preparation for an *Associate Software Engineer (Secure
 BSP Firmware)* role, which involves TF-A (BL31), OP-TEE, PSCI, SMC handling,
 Trusted Applications and secure boot.
 
-> **Status:** Part A is in progress (see the [Roadmap](#roadmap)). Nothing
-> below is final until the matching milestone is marked done. Hardware
+> **Status:** Part A is done; Part B is in progress (see the
+> [Roadmap](#roadmap)). Nothing below is final until the matching milestone is
+> marked done. Hardware
 > addresses and QEMU behaviors are verified against QEMU documentation/source
 > before they are used in code, and are recorded in `docs/NOTES.md`.
 
 ## Roadmap
 
-The project has three parts. Only **Part A** is being worked on now.
+The project has three parts. **Part A** is done; **Part B** is being worked on
+now.
 
 | Part | Goal | Platform |
 |------|------|----------|
@@ -26,7 +28,7 @@ The project has three parts. Only **Part A** is being worked on now.
 | **B** | "Secure Key Vault": TF-A + OP-TEE + Linux, end to end | QEMU, Docker build |
 | **C** | U-Boot, Linux driver, device tree, Yocto practice | BeagleBone Black (real hardware) |
 
-### Part A: bare-metal firmware (current)
+### Part A: bare-metal firmware (done)
 
 The firmware starts at CPU reset in **EL3**, with no TF-A and no external
 libraries. Each milestone adds one layer.
@@ -51,13 +53,44 @@ Design decisions for Part A:
   UART-output pattern checks for A2–A6 (no word-for-word diffs).
   The first GDB session of each milestone is still done by hand.
 
-### Part B: Secure Key Vault (later)
+### Part B: Secure Key Vault (current)
 
-- Custom SiP SMC handler in BL31, plus a Linux kernel module that calls it
-- A Trusted Application (OP-TEE) for key storage and signing
-- Trusted Board Boot: signed images and a tamper test
-- PSCI tracing with GDB
-- Automated tests and CI; TF-A and OP-TEE built inside a Docker container
+The real secure stack, built the way a BSP team builds it: TF-A (BL1, BL2,
+BL31 at EL3) → OP-TEE (BL32, Secure EL1) → U-Boot (BL33) → Linux (Non-secure
+EL1), on QEMU `virt`. The order is: make the upstream stack run, read it with
+GDB, only then change it, and secure it last.
+
+| # | Milestone | What it teaches | Done when |
+|---|-----------|-----------------|-----------|
+| B1 | Baseline: unmodified upstream stack boots, built in Docker | BL1→BL2→BL31→BL32/BL33 boot flow, FIP/BL images, OP-TEE SPD, Buildroot rootfs | Boots to a shell, `xtest` smoke set passes, boot-log test script, CI builds the stack |
+| B2 | Read the stack with GDB: boot flow and PSCI (`-smp 2`, `CPU_ON`) | TF-A runtime service framework, context management, warm boot; compare with the A4 dispatcher | SMC path documented in `docs/NOTES.md`, GDB script that traces it |
+| B3 | Custom SiP SMC service in BL31 + Linux driver | `DECLARE_RT_SVC`, SMCCC function IDs and `SMC_UNK`, a DT-probed driver calling `arm_smccc_smc()` | User-space test passes, unknown-ID test, `checkpatch.pl` clean |
+| B4 | Key Vault Trusted Application + client | GlobalPlatform TEE Internal Core API, secure storage, `libteec`; key generated inside the TEE, never exported | Sign in TEE → verify on host with `openssl`; threat model in `docs/THREAT_MODEL.md`; comparison with OP-TEE's PKCS#11 TA |
+| B5 | Trusted Board Boot | Chain of trust, X.509 certificates (`cert_create`), ROTPK, anti-rollback with NV counters | Tests for a valid image, a tampered image and a rolled-back image |
+| B6 | CI hardening | Build caching, QEMU tests in CI, boot logs as artifacts | Full test suite in CI, `make test REPEAT=10` for flaky checks |
+
+How Part B is built (industry practice, kept small enough to learn from):
+
+- **Pinned upstream versions** (no `master`), tracked as shallow git
+  submodules under `third_party/`. Changes to upstream live as patch series in
+  `bsp/patches/<component>/` (`git format-patch`), applied by a script.
+- **Own build system.** `bsp/Makefile` builds each component with explicit
+  flags, so every flag is visible and explained. The OP-TEE `build` repository
+  (`qemu_v8.mk`) is used only as a **reference** for known-good flags, not as
+  the build system.
+- **Reproducible build** in a Docker image (`bsp/docker/`) with a pinned base
+  image and toolchain; CI uses the same image.
+- **Upstream coding style** for code that touches TF-A, OP-TEE and Linux
+  (`checkpatch.pl`, SPDX headers).
+
+| Component | Version | Role |
+|-----------|---------|------|
+| TF-A | `lts-v2.14.14` | BL1, BL2, BL31 (EL3 runtime, SPD `opteed`) |
+| OP-TEE OS / client / test | `4.11.0` | BL32 (Secure EL1), `tee-supplicant` + `libteec`, `xtest` |
+| U-Boot | `v2026.10` | BL33, loads Linux |
+| Linux | `v6.18.63` (LTS) | Non-secure OS |
+| Buildroot | `2026.02.3` (LTS) | Root filesystem (initramfs) |
+| Arm GNU Toolchain | `14.3.rel1` (`aarch64-none-linux-gnu`) | Single cross compiler for every component |
 
 ### Part C: real hardware (later)
 
@@ -90,21 +123,28 @@ is not ARMv8 and gives no usable TrustZone for custom code.
  └─────────────────────────────────────────────────────────────┘
 ```
 
-## Repository layout (planned)
+## Repository layout
 
 ```
 armv8-secure-fw-lab/
 ├── README.md
 ├── LICENSE             # BSD-3-Clause
-├── Makefile
+├── Makefile            # Part A build
 ├── docs/
 │   └── NOTES.md        # per-milestone log: what was done, bugs, how they were debugged
-├── scripts/            # QEMU run / debug helper scripts
-├── linker/             # linker script(s)
-└── src/                # start.S, C sources, headers with register definitions
+├── scripts/            # Part A test scripts
+├── linker/             # Part A linker script
+├── src/ include/ payload/   # Part A firmware and EL1 payload
+├── third_party/        # Part B: pinned upstream submodules (TF-A, OP-TEE, U-Boot, Linux, Buildroot)
+├── bsp/                # Part B: our build system and code
+│   ├── Makefile        # builds every component out of tree into bsp/out/
+│   ├── dock            # runs a command inside the build container
+│   ├── docker/         # Dockerfile of the build container
+│   ├── configs/        # Kconfig fragments (U-Boot, Linux) and the Buildroot defconfig
+│   ├── br-ext/         # Buildroot external tree: OP-TEE user space from third_party/
+│   └── scripts/        # Part B tests
+└── .github/workflows/  # CI for Part A and Part B
 ```
-
-The exact layout may change as milestones are added.
 
 ## Prerequisites
 
@@ -127,12 +167,14 @@ sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
                  qemu-system-arm gdb-multiarch make git device-tree-compiler
 ```
 
-Part B additionally needs Docker.
+Part B additionally needs Docker. Every Part B tool (toolchain, QEMU, Buildroot
+host dependencies) lives in the Docker image, so nothing else is installed on
+the host. Plan for about 15 GB of free disk space (sources, build output and
+the image).
 
 ## Build and run
 
-> Targets below are the planned interface and will exist once milestone A1 is
-> done.
+Part A (native tools):
 
 ```sh
 make            # build the firmware ELF/binary
@@ -142,7 +184,20 @@ make test       # run the checks of all finished milestones (regression check)
 make clean
 ```
 
-`make test` will also support repeating the run 10 times to catch flaky results.
+Part B (inside the build container; the first call builds the image):
+
+```sh
+git submodule update --init --recursive --depth 1   # once, after cloning
+./bsp/dock make -C bsp          # build TF-A, OP-TEE, U-Boot, Linux, rootfs
+./bsp/dock make -C bsp run      # boot to a shell (login: root); OP-TEE log in bsp/out/bin/secure.log
+./bsp/dock make -C bsp debug    # same, paused for GDB on :1234
+./bsp/dock make -C bsp test     # boot test: every stage + xtest smoke set + poweroff
+./bsp/dock make -C bsp clean
+```
+
+Single components can be rebuilt with the targets `optee-os`, `u-boot`,
+`tf-a`, `buildroot` and `linux`. `JOBS=n` limits parallel jobs (the Linux build
+needs about 0.5 GB of RAM per job).
 
 Debugging with GDB (from A1 onward):
 

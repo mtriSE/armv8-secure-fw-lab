@@ -280,6 +280,46 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 
 ---
 
+## B1: Baseline secure stack (TF-A + OP-TEE + U-Boot + Linux), built in Docker
+
+**Goal:** the unmodified upstream stack boots on QEMU `virt` and passes an `xtest` smoke set, built by our own `bsp/Makefile` inside a pinned container. Nothing upstream is changed yet.
+
+### What was built
+- `third_party/`: shallow submodules at pinned tags: TF-A `lts-v2.14.14`, OP-TEE os/client/test `4.11.0`, U-Boot `v2026.10`, Linux `v6.18.63`, Buildroot `2026.02.3`. TF-A has nested submodules (`contrib/dtc`, `mbed-tls`, ...): clone with `--recurse-submodules`.
+- `bsp/docker/Dockerfile`: Debian 13 by digest + Arm GNU Toolchain 14.3.rel1 (`aarch64-none-linux-gnu`, sha256-checked). `bsp/dock` runs commands in it as the host user, image tag = hash of the Dockerfile.
+- `bsp/Makefile`: one target per component, all out of tree (`O=` / `BUILD_BASE=`) into `bsp/out/`, so the submodules stay clean. Flags taken from the OP-TEE reference build (`OP-TEE/build` `qemu_v8.mk` 4.11.0) and commented.
+- `bsp/configs/`: U-Boot and Linux Kconfig fragments (merged with `merge_config.sh`), Buildroot defconfig (external toolchain, BusyBox, gzip initramfs).
+- `bsp/br-ext/`: Buildroot external tree; `optee-client-lab` (libteec, tee-supplicant run as user `teesuppl`, not root) and `optee-test-lab` (xtest + 21 test TAs built against our TA dev kit).
+- `bsp/scripts/test_b1.sh` + `b1.exp`: boot, log in, `xtest -t regression 1001 1004 4001 6001`, `poweroff`; then pattern checks on both UART logs.
+- `.github/workflows/ci.yml`: Part A in a `debian:trixie-slim` container; Part B builds and boots in the `bsp/dock` image.
+
+### Key concepts
+- **Boot flow** (from the log): BL1 (EL3, ROM at flash 0) loads BL2 → `BL1: Booting BL2` with `SPSR = 0x3c5` (S-EL1h, DAIF masked). BL2 runs at **S-EL1**, loads BL31 (image id 3, 0x0e090000), BL32 = OP-TEE (id 4 header + id 21 pager, 0x0e100000) and BL33 = U-Boot (id 5, 0x60000000). BL2 cannot enter EL3 itself, so it SMCs back to BL1, which ERETs into BL31: `BL1: Booting BL31`, `SPSR = 0x3cd` (EL3h).
+- BL31 then runs OP-TEE init first (S-EL1, via SPD `opteed`), OP-TEE returns with an SMC (`Primary CPU switching to normal world boot`), and BL31 ERETs to U-Boot at NS-EL1. Same sequence as A4 (Secure EL1 pass, then Non-secure), now done by TF-A.
+- `WARNING: Firmware Image Package header check failed`: expected. There is no FIP in flash (only `bl1.bin` via `-bios`), so TF-A falls back to semihosting and reads `bl2.bin`, `bl31.bin`, `bl32*.bin`, `bl33.bin` from QEMU's working directory. U-Boot loads `Image` and `rootfs.cpio.gz` the same way (`load hostfs`). QEMU-only: a board reads eMMC/SPI flash.
+- Memory: OP-TEE owns secure DRAM 0x0e100000–0x0effffff (`CFG_TZDRAM_*`); its static shared memory with Linux is NS RAM **0x42000000–0x421fffff** (`CFG_SHMEM_*`). Both appear as `nomap` reserved-memory in the Linux log; OP-TEE adds them to the DTB before it is handed to U-Boot. U-Boot's default `kernel_addr_r` (0x40400000) would put the 41 MB Image over the SHM, so we load it at 0x42200000.
+- Secure world logs go to UART1 (0x09040000, `-serial file:secure.log`): with `secure=on` that UART is only mapped in the Secure address space, so Linux cannot see or use it.
+- `tee-supplicant`: OP-TEE has no filesystem; to load a TA (`/lib/optee_armtz/<uuid>.ta`) or store secure-storage files (`/var/lib/tee`) it makes an RPC to Linux, served by this daemon through `/dev/teepriv0`. Clients use `/dev/tee0`.
+- `poweroff` → Linux PSCI `SYSTEM_OFF` (SMC) → BL31 → QEMU exits: the first PSCI call we observe (B2 traces `CPU_ON`).
+- Buildroot external toolchain: Buildroot checks the declared toolchain (GCC 14, headers 4.20, glibc, C++, Fortran, OpenMP) against the real one and refuses any mismatch.
+
+### Bugs and debugging
+| Symptom | Cause | How it was found |
+|---------|-------|------------------|
+| TF-A: `contrib/dtc/libfdt/Makefile.libfdt: No such file` | TF-A ≥ 2.12 has its own submodules (dtc, libtl, mbed-tls, ...) | `.gitmodules` in TF-A; `git submodule update --init --depth 1` |
+| Buildroot: `Fortran support is not selected but is available in external toolchain` | external toolchain declaration must match exactly | error text; added `FORTRAN`/`OPENMP` (as the reference config does) |
+| Buildroot: `cannot stat .../out/ta/*/*.ta` | Buildroot builds CMake packages in source; CMake overwrote `optee_test/ta/Makefile`, so `make -C ta` did nothing | empty make output; optee_test keeps the original as `ta/Makefile.gmake` (`-f Makefile.gmake`) |
+| QEMU: `failed to find romfile "efi-virtio.rom"` | default virtio NIC needs the iPXE ROM (package not in the image) | `console.log`; `-nic none`, no network needed |
+| Test FAIL on TF-A lines | guessed patterns (`BL2: Booting BL2`) before the first real boot | real log: BL1 boots both BL2 and BL31 (see above) |
+
+### Verification
+- `./bsp/dock make -C bsp test`: B1 PASS twice in a row, ~40 s per boot. xtest: `631 subtests of which 0 failed`, `4 test cases of which 0 failed`.
+- Part A `make test`: A1–A6 still PASS. All submodules have 0 changes after the build.
+- Sizes: sources 2.0 GB Linux + 0.6 GB others; build output ~3.3 GB (`bsp/out/linux` 1.6 GB, `bsp/out/buildroot` 1.2 GB); image 2.2 GB. Image 41 MB, rootfs.cpio.gz 9.8 MB.
+- CI workflow written but not run yet (needs a push).
+
+---
+
 ## Open questions
 
--
+- TF-A warns `cortex_a53: CPU workaround for erratum 835769/855873/1530924 was missing`: the `ERRATA_A53_*` build flags are off for PLAT=qemu. Harmless on QEMU; on silicon they are required. Look at how a real platform enables them (B2).
