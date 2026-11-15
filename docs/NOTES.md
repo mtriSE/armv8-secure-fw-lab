@@ -12,7 +12,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 | A3 | EL3 vector table and exception handler | [x] |
 | A4 | EL3 to EL1 (`eret`), `smc` back to EL3 | [x] |
 | A5 | MMU at Non-secure EL1 | [x] |
-| A6 | GICv3 and generic timer | [ ] |
+| A6 | GICv3 and generic timer | [x] |
 
 ## Hardware facts to verify
 
@@ -36,17 +36,19 @@ Fill in the value, the source, and the date once verified. Do not use unverified
 | `VBAR_EL3` reset value | 0 in QEMU (architecturally UNKNOWN) | `-d int`: unhandled `brk` goes to PC 0x200 | yes |
 | `VBAR_EL3` low bits | QEMU keeps bits [10:0] (a table at 0x1180 still works); hardware treats them as RES0 | A3 `.align 7` experiment | yes |
 | `SCTLR_EL3` at reset | 0x00c50838: M=0, A=0, C=0, SA=1, I=0 | printed by A3 | yes |
-| Generic timer PPI INTID (NS EL1 physical timer) | DT `timer` interrupts list `0x0d, 0x0e, 0x0b, 0x0a`; confirm which is NS EL1 phys (expected 30) in A6 | `dumpdtb` | partly |
+| Generic timer PPI INTID (NS EL1 physical timer) | 30 (DT `timer` PPIs 13, 14, 11, 10 = secure phys, NS phys, virt, hyp; PPI 14 → INTID 16+14) | `dumpdtb` + A6: `ICC_IAR1_EL1` returns 30 | yes |
+| `CNTFRQ_EL0` | 62 500 000 Hz (Cortex-A53 on QEMU; set by QEMU, firmware would program it on hardware) | printed by A6 | yes |
+| GICv3 state after EL3 init | `GICD_CTLR=0x37` (EnableGrp0/1NS/1S, ARE_S, ARE_NS), `GICR_WAKER=0` | printed by A6 | yes |
 
 ## Memory map (final design)
 
-Fill in during A1 once the linker script exists.
-
 | Region | Base | Size | World | Contents |
 |--------|------|------|-------|----------|
-| Secure flash | 0x0000_0000 | 64M | Secure | `.text`, `.rodata`, and the load image of `.data` |
-| Secure RAM | 0x0e00_0000 | 16M | Secure | `.data` (copied at boot), `.bss`, EL3 stack (16K) |
-| Non-secure RAM | 0x4000_0000 | 256M | Non-secure | EL1 payload, page tables, EL1 stack |
+| Secure flash | 0x0000_0000 | 64M | Secure | EL3 `.text`, `.rodata`, load image of `.data`, embedded payload image (`payload_blob`) |
+| Secure RAM | 0x0e00_0000 | 16M | Secure | EL3 `.data` (copied at boot; `data_probe` at the base), `.bss`, EL3 stack (16K) |
+| Non-secure RAM | 0x4000_0000 | 256M | Non-secure | EL1 payload (copied by EL3): code, data, BSS with the 4KB-aligned L1 table, EL1 stack (16K) |
+
+EL1 virtual map after A5 (Non-secure EL1): 0x0-0x3fff_ffff Device (identity), 0x4000_0000-0x7fff_ffff Normal (identity), 0x8000_0000 unmapped, 0xc000_0000 alias of 0x4000_0000.
 
 ## Commands cheat sheet
 
@@ -248,18 +250,33 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 **Goal:** route one PPI (timer) through GICv3 using the `ICC_*` system registers and get periodic interrupts.
 
 ### What was built
--
+- `src/gic_el3.c` (Secure, before any lower EL runs): `ICC_SRE_EL3` = SRE|DFB|DIB|Enable; `GICD_CTLR` = ARE_S|ARE_NS, wait RWP, then also enable Grp0/Grp1NS/Grp1S; wake the redistributor (`GICR_WAKER.ProcessorSleep` = 0, wait `ChildrenAsleep` = 0); INTID 30 → Group 1 Non-secure (`IGROUPR0` bit 30 = 1, `IGRPMODR0` bit 30 = 0).
+- `payload/gic.c` (NS EL1 "driver"): `ICC_SRE_EL1.SRE`, `ICC_PMR_EL1` = 0xff, `ICC_IGRPEN1_EL1` = 1, priority byte + `GICR_ISENABLER0` for INTID 30, ack via `ICC_IAR1_EL1`, `ICC_EOIR1_EL1` for EOI.
+- `payload/a6.c`: NS EL1 physical timer, 10 ms period (`CNTP_TVAL_EL0` = CNTFRQ/100, `CNTP_CTL_EL0.ENABLE`), `msr daifclr, #2`, `wfi` until 5 ticks; the IRQ vector (EL1 0x280) calls `irq_handler`.
+- `include/gic.h`: register offsets shared by both sides.
 
 ### Key concepts
--
+- GICv3 has three parts: Distributor (global, SPIs), one Redistributor per CPU (SGIs/PPIs, power state) at RD_base with the SGI_base frame 64KB above, and the CPU interface as system registers (`ICC_*`).
+- With security enabled (`GICD_CTLR.DS` = 0) the **group** of an interrupt is Secure-only state. EL3 decides which interrupts the Normal world owns; the NS driver can only enable/prioritise those. Same split as TF-A (`plat_gic` setup in BL31) vs Linux.
+- Group 1 NS interrupts are signalled as IRQ to Non-secure EL1 (with `SCR_EL3.IRQ` = 0). Group 0 would be FIQ.
+- `SCR_EL3.IRQ` = 1 does more than routing: NS EL1 accesses to the Group 1 CPU-interface registers then trap to EL3 (EC 0x18).
+- Timer output is level-sensitive: reprogram (`TVAL`) or disable it **before** EOI, or the interrupt is immediately pending again.
+- `ICC_IAR1_EL1` read = acknowledge (INTID becomes active); 1023 = spurious, no EOI. `ICC_EOIR1_EL1` write = priority drop + deactivate (EOImode 0).
+- Reset state has DAIF = 1111 (A1): IRQs must be unmasked explicitly (`daifclr, #2`). `wfi` sleeps until an interrupt is pending.
+- `isb` before reading `CNTPCT_EL0`, otherwise the counter may be read early.
+- GIC MMIO is reachable after A5 because the first 1GB is mapped Device-nGnRnE.
 
 ### Bugs and debugging
 | Symptom | Cause | How it was found |
 |---------|-------|------------------|
-| | | |
+| (break test) no ticks, run ends by timeout | EL3 left INTID 30 in Group 0 → signalled as FIQ (Secure-owned), never as IRQ to NS EL1; `IGROUPR0` printed 0 | A6 EL3 line + test |
+| (break test) 71 565 "ticks" in 3 s, never finishes | timer not reprogrammed/stopped before EOI → level interrupt re-asserts at once | UART output |
+| (break test) EL3 panic `low64_sync`, `ESR_EL3=0x623e3018`, EC 0x18 | `SCR_EL3.IRQ` = 1: the NS write to `ICC_IGRPEN1_EL1` traps to EL3. ISS decodes to Op0=3 Op1=0 CRn=12 CRm=12 Op2=7, write = `S3_0_C12_C12_7` | EL3 panic dump; added EC 0x18 to the decoder |
 
 ### Verification
--
+- Output: `GICD_CTLR=0x37 GICR_WAKER=0x0 IGROUPR0=0x40000000 IGRPMODR0=0x0`, `CNTFRQ_EL0=62500000`, ticks 1–5 with `intid=30`, `5 timer IRQs in 52 ms` (≥ 5 × 10 ms required).
+- `make test`: A1–A6 PASS; 10 consecutive runs all pass; the full suite takes ~2 s.
+- Break tests: the three above, each FAILs.
 
 ---
 

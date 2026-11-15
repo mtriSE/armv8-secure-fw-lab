@@ -17,4 +17,5 @@ void irq_handler(void);
 const char *payload_ok(int ok);
 
 void a5_run(void);
+void a6_run(void);
 #endif

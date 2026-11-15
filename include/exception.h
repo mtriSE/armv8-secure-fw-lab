@@ -43,6 +43,7 @@ struct trap_frame {
 #define EC_UNKNOWN     0x00
 #define EC_SVC64       0x15
 #define EC_SMC64       0x17
+#define EC_SYSREG      0x18   /* trapped MSR/MRS/system instruction */
 #define EC_IABT_CUR    0x21
 #define EC_PC_ALIGN    0x22
 #define EC_DABT_CUR    0x25

@@ -31,6 +31,7 @@ static const char *ec_name(uint64_t ec)
     case EC_UNKNOWN:  return "unknown/undefined instruction";
     case EC_SVC64:    return "svc (AArch64)";
     case EC_SMC64:    return "smc (AArch64)";
+    case EC_SYSREG:   return "trapped msr/mrs";
     case EC_IABT_CUR: return "instruction abort, same EL";
     case EC_PC_ALIGN: return "PC alignment fault";
     case EC_DABT_CUR: return "data abort, same EL";

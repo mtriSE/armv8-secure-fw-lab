@@ -63,16 +63,10 @@ void payload_main(void)
     probe_secure_ram(w, (int)world);
 
     /* The rest only runs in the Normal world, like a rich OS would. */
-    if (world == WORLD_NONSECURE)
+    if (world == WORLD_NONSECURE) {
         a5_run();
+        a6_run();
+    }
 
     smc_call(SIP_DONE, (uint64_t)failures, 0, 0);   /* does not return */
-}
-
-/* No interrupts are enabled yet (A6). */
-void irq_handler(void)
-{
-    printf("A4: unexpected IRQ\n");
-    for (;;)
-        __asm__ volatile("wfe");
 }
