@@ -26,6 +26,14 @@ SMP    ?= 2
 # One toolchain for everything (installed in the container, see docker/Dockerfile).
 CROSS_COMPILE := aarch64-none-linux-gnu-
 
+# Version strings must not depend on how the sources were checked out.
+# Upstream builds call "git describe", which needs tags; CI fetches submodules
+# by commit (depth 1, no tags), so the same source gave "4.11.0" locally but
+# "f54190f" in CI. Instead use the version each project declares in its own
+# makefiles plus the pinned submodule commit, which is the same everywhere.
+src_rev = $(shell git -C $(TP)/$(1) rev-parse --short=12 HEAD)
+mk_var  = $(shell sed -n 's/^$(2)[[:space:]]*[:?]*=[[:space:]]*//p' $(TP)/$(1))
+
 .PHONY: all optee-os u-boot tf-a buildroot linux bin run debug test clean
 all: bin
 
@@ -43,7 +51,8 @@ OPTEE_FLAGS := -C $(TP)/optee_os O=$(OPTEE_OUT) \
 	CFG_ARM64_core=y CFG_USER_TA_TARGETS=ta_arm64 CFG_ARM_GICV3=y \
 	CROSS_COMPILE=$(CROSS_COMPILE) CROSS_COMPILE_core=$(CROSS_COMPILE) \
 	CROSS_COMPILE_ta_arm64=$(CROSS_COMPILE) \
-	DEBUG=$(DEBUG) CFG_TEE_CORE_LOG_LEVEL=3
+	DEBUG=$(DEBUG) CFG_TEE_CORE_LOG_LEVEL=3 \
+	TEE_IMPL_VERSION=$(call mk_var,optee_os/mk/config.mk,CFG_OPTEE_REVISION_MAJOR).$(call mk_var,optee_os/mk/config.mk,CFG_OPTEE_REVISION_MINOR)-g$(call src_rev,optee_os)
 # TA dev kit: headers, libs and signing script that TAs (optee_test, B4) build against.
 TA_DEV_KIT := $(OPTEE_OUT)/export-ta_arm64
 
@@ -54,7 +63,9 @@ optee-os:
 # U-Boot (BL33): the Non-secure bootloader that loads Linux
 ################################################################################
 UBOOT_OUT   := $(OUT)/u-boot
-UBOOT_FLAGS := -C $(TP)/u-boot O=$(UBOOT_OUT) CROSS_COMPILE=$(CROSS_COMPILE)
+# LOCALVERSION= (set but empty) + LOCALVERSION_AUTO off (u-boot.config):
+# the version is exactly the one in U-Boot's Makefile, with no git suffix.
+UBOOT_FLAGS := -C $(TP)/u-boot O=$(UBOOT_OUT) CROSS_COMPILE=$(CROSS_COMPILE) LOCALVERSION=
 
 # qemu_arm64_defconfig + our fragment (configs/u-boot.config), merged with the
 # kernel-style merge_config.sh, which warns when a requested value is dropped.
@@ -77,6 +88,7 @@ u-boot: $(UBOOT_OUT)/.config
 # BL32_RAM_LOCATION=tdram: OP-TEE runs from secure DRAM 0x0e100000 (SEC_DRAM_BASE).
 # BL33:               U-Boot, loaded at NS_IMAGE_OFFSET = 0x60000000.
 # QEMU_USE_GIC_DRIVER=QEMU_GICV3: matches gic-version=3.
+# BUILD_STRING:      shown after the version ("v2.14.14(debug):<commit>").
 # "all fip": also build the FIP container (used for Trusted Board Boot in B5).
 TFA_OUT   := $(OUT)/tf-a/qemu/$(if $(filter 1,$(DEBUG)),debug,release)
 TFA_FLAGS := -C $(TP)/trusted-firmware-a BUILD_BASE=$(OUT)/tf-a \
@@ -87,7 +99,8 @@ TFA_FLAGS := -C $(TP)/trusted-firmware-a BUILD_BASE=$(OUT)/tf-a \
 	BL32_EXTRA2=$(OPTEE_OUT)/core/tee-pageable_v2.bin \
 	BL32_RAM_LOCATION=tdram \
 	BL33=$(UBOOT_OUT)/u-boot.bin \
-	QEMU_USE_GIC_DRIVER=QEMU_GICV3
+	QEMU_USE_GIC_DRIVER=QEMU_GICV3 \
+	BUILD_STRING=$(call src_rev,trusted-firmware-a)
 
 tf-a: optee-os u-boot
 	$(MAKE) $(TFA_FLAGS) -j$(JOBS) all fip
@@ -119,7 +132,9 @@ buildroot: $(BR_OUT)/.config optee-os
 # arm64 defconfig + configs/linux.config (OP-TEE driver, GDB scripts).
 # Only the Image target is built; no modules are needed in B1.
 LINUX_OUT   := $(OUT)/linux
-LINUX_FLAGS := -C $(TP)/linux O=$(LINUX_OUT) ARCH=arm64 CROSS_COMPILE=$(CROSS_COMPILE)
+# LOCALVERSION= + LOCALVERSION_AUTO off (linux.config): release is exactly 6.18.63.
+LINUX_FLAGS := -C $(TP)/linux O=$(LINUX_OUT) ARCH=arm64 CROSS_COMPILE=$(CROSS_COMPILE) \
+	LOCALVERSION=
 
 $(LINUX_OUT)/.config: configs/linux.config
 	mkdir -p $(LINUX_OUT)

@@ -24,17 +24,20 @@ check() {
     fi
 }
 
+# Version strings are checked exactly (no git suffix, see bsp/Makefile), so a
+# checkout without tags (CI) gives the same strings as a local one.
 # Boot stages, in order of appearance. BL2 runs at S-EL1, so it cannot enter
 # EL3 itself: it hands BL31's entry point back to BL1 with an SMC, and BL1
 # (still EL3) jumps there. Hence "BL1: Booting BL31", not "BL2: ...".
 check console "$con" '^NOTICE:  Booting Trusted Firmware'
 check console "$con" '^NOTICE:  BL1: Booting BL2'
-check console "$con" '^NOTICE:  BL2: v2\.14\.14'
+check console "$con" '^NOTICE:  BL2: v2\.14\.14\(debug\):[0-9a-f]{12}$'
 check console "$con" '^NOTICE:  BL1: Booting BL31'
-check console "$con" '^NOTICE:  BL31: v2\.14\.14'
-check secure  "$sec" 'I/TC: OP-TEE version: 4\.11\.0'
+check console "$con" '^NOTICE:  BL31: v2\.14\.14\(debug\):[0-9a-f]{12}$'
+check secure  "$sec" 'I/TC: OP-TEE version: 4\.11-g[0-9a-f]{12} '
 check secure  "$sec" 'I/TC: Primary CPU switching to normal world boot'
-check console "$con" '^U-Boot 2026\.10'
+check console "$con" '^U-Boot 2026\.10 \('
+check console "$con" 'Linux version 6\.18\.63 '
 check console "$con" 'Booting Linux on physical CPU'
 check console "$con" 'psci: PSCIv1\.1 detected in firmware'
 check console "$con" 'optee: revision 4\.11'

@@ -311,6 +311,7 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 | Buildroot: `cannot stat .../out/ta/*/*.ta` | Buildroot builds CMake packages in source; CMake overwrote `optee_test/ta/Makefile`, so `make -C ta` did nothing | empty make output; optee_test keeps the original as `ta/Makefile.gmake` (`-f Makefile.gmake`) |
 | QEMU: `failed to find romfile "efi-virtio.rom"` | default virtio NIC needs the iPXE ROM (package not in the image) | `console.log`; `-nic none`, no network needed |
 | Test FAIL on TF-A lines | guessed patterns (`BL2: Booting BL2`) before the first real boot | real log: BL1 boots both BL2 and BL31 (see above) |
+| CI only: `missing (secure): OP-TEE version: 4\.11\.0`, log shows `OP-TEE version: f54190f` | version strings come from `git describe`, which needs tags; `actions/checkout` fetches submodules by commit (depth 1, no tags). TF-A (`:b3367b5`), U-Boot and Linux (`-g<sha>`) changed too: same source, different binaries depending on the checkout | replayed the test's `check` lines on the CI log artifact. Fix: versions from each project's own makefiles + submodule commit (`TEE_IMPL_VERSION`, `BUILD_STRING`), `LOCALVERSION=` with `LOCALVERSION_AUTO` off; the test now checks the exact strings |
 
 ### Verification
 - `./bsp/dock make -C bsp test`: B1 PASS twice in a row, ~40 s per boot. xtest: `631 subtests of which 0 failed`, `4 test cases of which 0 failed`.
