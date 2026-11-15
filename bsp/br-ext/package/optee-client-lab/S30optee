@@ -1,0 +1,36 @@
+#!/bin/sh
+# Start tee-supplicant, the Normal-world helper of OP-TEE.
+#
+# OP-TEE cannot read files or the network by itself: when it needs a TA binary
+# (/lib/optee_armtz/<uuid>.ta) or a secure storage file (/var/lib/tee), it
+# sends an RPC to Linux, and tee-supplicant serves it through /dev/teepriv0.
+
+DAEMON=/usr/sbin/tee-supplicant
+PIDFILE=/var/run/tee-supplicant.pid
+
+start() {
+	printf 'Starting tee-supplicant: '
+	chown root:teepriv /dev/teepriv0 && chmod 0660 /dev/teepriv0 &&
+	chown root:tee /dev/tee0 && chmod 0660 /dev/tee0 &&
+	mkdir -p /var/lib/tee && chown teesuppl:teesuppl /var/lib/tee &&
+	chmod 0700 /var/lib/tee &&
+	start-stop-daemon -S -q -b -m -p "$PIDFILE" -c teesuppl -x "$DAEMON" \
+		-- /dev/teepriv0
+	status=$?
+	[ "$status" -eq 0 ] && echo "OK" || echo "FAIL"
+	return "$status"
+}
+
+stop() {
+	printf 'Stopping tee-supplicant: '
+	start-stop-daemon -K -q -p "$PIDFILE"
+	status=$?
+	[ "$status" -eq 0 ] && echo "OK" || echo "FAIL"
+	return "$status"
+}
+
+case "$1" in
+	start|stop) "$1" ;;
+	restart|reload) stop; sleep 1; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

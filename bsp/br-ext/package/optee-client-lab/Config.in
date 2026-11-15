@@ -1,0 +1,9 @@
+config BR2_PACKAGE_OPTEE_CLIENT_LAB
+	bool "optee-client (third_party/optee_client)"
+	select BR2_PACKAGE_UTIL_LINUX
+	select BR2_PACKAGE_UTIL_LINUX_LIBS
+	select BR2_PACKAGE_UTIL_LINUX_LIBUUID
+	help
+	  libteec (GlobalPlatform TEE Client API) and tee-supplicant, the
+	  Normal-world daemon that serves OP-TEE's requests (loading TAs,
+	  secure storage files), built from the pinned submodule.

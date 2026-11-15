@@ -1,0 +1,31 @@
+# Buildroot defconfig: minimal BusyBox rootfs as a gzip initramfs.
+BR2_aarch64=y
+BR2_cortex_a53=y
+
+# External toolchain: the Arm GNU Toolchain in the container (same compiler as
+# TF-A, OP-TEE, U-Boot and Linux). Buildroot checks these settings against the
+# toolchain itself (gcc version, kernel headers, C library) and refuses to build
+# if they do not match.
+BR2_TOOLCHAIN_EXTERNAL=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM=y
+BR2_TOOLCHAIN_EXTERNAL_PATH="/opt/toolchains/aarch64"
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_PREFIX="aarch64-none-linux-gnu"
+BR2_TOOLCHAIN_EXTERNAL_GCC_14=y
+BR2_TOOLCHAIN_EXTERNAL_HEADERS_4_20=y
+BR2_TOOLCHAIN_EXTERNAL_CUSTOM_GLIBC=y
+BR2_TOOLCHAIN_EXTERNAL_CXX=y
+# Not used, but the toolchain has them and Buildroot requires an exact match.
+BR2_TOOLCHAIN_EXTERNAL_FORTRAN=y
+BR2_TOOLCHAIN_EXTERNAL_OPENMP=y
+# BR2_TOOLCHAIN_EXTERNAL_INET_RPC is not set
+
+BR2_TARGET_GENERIC_HOSTNAME="vault"
+BR2_TARGET_GENERIC_ISSUE="armv8-secure-fw-lab Part B (login: root)"
+BR2_TARGET_GENERIC_GETTY_PORT="ttyAMA0"
+# BR2_TARGET_ROOTFS_TAR is not set
+BR2_TARGET_ROOTFS_CPIO=y
+BR2_TARGET_ROOTFS_CPIO_GZIP=y
+
+# OP-TEE user space (br-ext/): tee-supplicant, libteec, xtest + test TAs.
+BR2_PACKAGE_OPTEE_CLIENT_LAB=y
+BR2_PACKAGE_OPTEE_TEST_LAB=y

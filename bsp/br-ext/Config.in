@@ -1,0 +1,2 @@
+source "$BR2_EXTERNAL_LAB_PATH/package/optee-client-lab/Config.in"
+source "$BR2_EXTERNAL_LAB_PATH/package/optee-test-lab/Config.in"

@@ -1,0 +1,8 @@
+config BR2_PACKAGE_OPTEE_TEST_LAB
+	bool "optee-test (third_party/optee_test)"
+	select BR2_PACKAGE_OPTEE_CLIENT_LAB
+	select BR2_PACKAGE_OPENSSL
+	help
+	  xtest (OP-TEE's test suite, Normal-world side) and its Trusted
+	  Applications, built against the TA dev kit exported by our
+	  optee_os build (LAB_TA_DEV_KIT_DIR, set by bsp/Makefile).
