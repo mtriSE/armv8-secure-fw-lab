@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Part A: bare-metal firmware with the native Debian 13 tools (same distro
+  # and QEMU version as the development host), ~2 s of tests.
+  part-a:
+    runs-on: ubuntu-24.04
+    container: debian:trixie-slim
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            qemu-system-arm gdb-multiarch make
+      - run: make
+      - run: make test
+
+  # Part B: the full stack, built and tested inside the pinned container.
+  part-b:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Free disk space
+        # The stack needs ~12 GB; the runner image ships large unused SDKs.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # shallow, like the main checkout
+
+      - name: Cache Buildroot downloads
+        uses: actions/cache@v4
+        with:
+          path: bsp/out/dl
+          key: br-dl-${{ hashFiles('bsp/configs/buildroot_defconfig', '.gitmodules') }}
+          restore-keys: br-dl-
+
+      - name: Build container image
+        run: ./bsp/dock true
+
+      - name: Build the stack
+        run: ./bsp/dock make -C bsp all
+
+      - name: Boot test (B1)
+        run: ./bsp/dock make -C bsp test
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: part-b-logs
+          path: |
+            bsp/out/bin/*.log
+          if-no-files-found: ignore
