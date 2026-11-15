@@ -2,7 +2,9 @@
 set pagination off
 set confirm off
 target remote :1234
-hbreak main
+# "*main" = first instruction of main, before its prologue pushes a frame.
+# Plain "main" stops after the prologue, where sp is already __stack_top - 16.
+hbreak *main
 printf "A1: at reset pc=0x%lx (_start=0x%lx) CPSR=0x%lx\n", $pc, (unsigned long)&_start, $cpsr
 if ($pc != (unsigned long)&_start)
   printf "A1: FAIL pc != _start\n"

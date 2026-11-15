@@ -4,7 +4,9 @@ OBJCOPY := $(CROSS)objcopy
 OBJDUMP := $(CROSS)objdump
 
 BUILD := build
-CFLAGS  := -mcpu=cortex-a53 -ffreestanding -nostdlib -fno-pic -O0 -g -Wall -Wextra -Iinclude
+# -mgeneral-regs-only: no FP/SIMD registers. Variadic functions (printf) would
+# otherwise save q0-q7 in their prologue, which faults if FP access is trapped.
+CFLAGS  := -mcpu=cortex-a53 -mgeneral-regs-only -ffreestanding -nostdlib -fno-pic -O0 -g -Wall -Wextra -Iinclude
 ASFLAGS := -mcpu=cortex-a53 -g
 LDFLAGS := -nostdlib -static -T linker/link.ld -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
@@ -38,8 +40,12 @@ run: all
 debug: all
 	$(QEMU) $(QEMU_FLAGS) -s -S
 
+# Regression: every finished milestone. Run all, fail if any failed.
 test: all
-	scripts/test_a1.sh
+	@rc=0; \
+	scripts/test_a1.sh || rc=1; \
+	scripts/test_a2.sh || rc=1; \
+	exit $$rc
 
 clean:
 	rm -rf $(BUILD)
