@@ -1,6 +1,7 @@
 #include "uart.h"
 #include "printf.h"
 #include "a3_tests.h"
+#include "el3.h"
 
 #include <stdint.h>
 
@@ -41,6 +42,7 @@ int main(void)
     printf("A2: done\n");
 
     a3_run_tests();
-    for (;;)
-        __asm__ volatile("wfe");
+
+    /* A4: hand over to the EL1 payload; EL3 only runs again on SMCs. */
+    el3_start_payload();
 }

@@ -8,7 +8,7 @@
  * Plain byte loops on purpose: simple and correct for any alignment. Speed does
  * not matter here.
  */
-#include <stddef.h>
+#include "lib.h"
 
 void *memset(void *dst, int c, size_t n)
 {

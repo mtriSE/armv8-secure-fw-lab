@@ -47,12 +47,18 @@ struct trap_frame {
 #define EC_PC_ALIGN    0x22
 #define EC_DABT_CUR    0x25
 #define EC_SP_ALIGN    0x26
+
+/* Data/instruction abort ISS: fault status code and write-not-read */
+#define ISS_DFSC(iss)  ((iss) & 0x3f)
+#define ISS_WNR(iss)   (((iss) >> 6) & 1)
 #define EC_BRK64       0x3c
 
 void el3_exception_handler(uint64_t vec, struct trap_frame *tf);
+void el1_exception_handler(uint64_t vec, struct trap_frame *tf);
 
 /* Fault self-test support: arm before a deliberate fault. The handler records
- * ESR/ELR/FAR, skips the faulting instruction and returns instead of halting. */
+ * ESR/ELR/FAR, skips the faulting instruction and returns instead of halting.
+ * expect_fault(NULL) disarms (when the access is expected NOT to fault). */
 struct fault_record {
     uint64_t esr, elr, far;
     int taken;

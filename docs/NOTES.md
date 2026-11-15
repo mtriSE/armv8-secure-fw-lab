@@ -10,7 +10,7 @@ Status legend: `[ ]` not started, `[~]` in progress, `[x]` done.
 | A1 | `start.S`, linker script, Makefile | [x] |
 | A2 | PL011 UART driver and minimal printf | [x] |
 | A3 | EL3 vector table and exception handler | [x] |
-| A4 | EL3 to EL1 (`eret`), `smc` back to EL3 | [ ] |
+| A4 | EL3 to EL1 (`eret`), `smc` back to EL3 | [x] |
 | A5 | MMU at Non-secure EL1 | [ ] |
 | A6 | GICv3 and generic timer | [ ] |
 
@@ -175,18 +175,33 @@ Leave QEMU `-nographic` with `Ctrl-A` then `X`.
 **Goal:** enter Secure EL1, then Non-secure EL1 (`SCR_EL3.NS`), and return a result through `smc` (SMCCC: function ID in `x0`, args `x1`-`x3`).
 
 ### What was built
--
+- `payload/`: a separate EL1 image (own `start.S`, `link.ld` at 0x4000_0000, EL1 vectors, handler, `main.c`), reusing `uart.c`/`printf.c`/`lib.c`. Built to `build/payload.bin` and embedded into the firmware with `.incbin` (`src/payload_blob.S`).
+- `src/el3_payload.c`: EL3 copies the payload to NS RAM (`__ns_start`, reserved in A1), resets EL1 sysregs, sets `SCR_EL3`, and enters it via `el3_eret` (`src/el3_eret.S`: set ELR/SPSR, zero x1-x30, `eret`).
+- SMC dispatcher (EL3, vector 0x400, EC 0x17): `SMCCC_VERSION`, SiP `ADD`, `GET_WORLD`, `DONE`, and `SMCCC_UNKNOWN` (-1) for anything else (`include/smccc.h`).
+- Flow: Secure EL1 run → `SIP_DONE` → EL3 reloads the payload, clears the trap frame, rewrites ELR/SPSR in it, sets `SCR_EL3.NS` → the same `eret` lands in Non-secure EL1 → `SIP_DONE` → EL3 exits QEMU via semihosting with the failure count as exit status.
+- `include/vector_table.h`: the A3 vector table turned into a macro used for both EL3 and EL1.
+- Tests: `scripts/lib.sh` (shared QEMU run + line matching), `test_a4.sh`; `make test` runs every `scripts/test_aN.sh`. Semihosting exit made the whole suite take ~1.6 s instead of 5 s per test.
 
 ### Key concepts
--
+- There is no "go to EL1" instruction: EL3 fakes an exception return. `ELR_EL3` = entry, `SPSR_EL3` = 0x3c5 (EL1h, DAIF masked), `SCR_EL3` = RW (AArch64 below) + NS (world), then `eret`.
+- `SCR_EL3.NS` decides the world of everything below EL3. It does not change EL3's own accesses (EL3 is always Secure in AArch64).
+- SMC: preferred return address is already the next instruction, so the dispatcher must **not** add 4 (break test: adding 4 corrupts results). Results go back by writing `tf->x[0]`; the common exit code restores registers from the frame.
+- SMCCC function ID: bit 31 fast call, bit 30 SMC64, bits [29:24] owner (2 = SiP), [15:0] number → `0xC2000001`... Only w0 is significant.
+- EL1 system registers (SCTLR_EL1, VBAR_EL1, TTBR0_EL1, SP_EL1...) are **not banked** between worlds. EL3 must reset (or, in real firmware, save/restore) them on a world switch, and clear general registers so Secure values do not leak to Non-secure (TF-A: context management).
+- TrustZone in action: Secure EL1 reads Secure RAM (val 0x1234 = EL3 `data_probe`); the same `ldr` from Non-secure EL1 gets a synchronous external abort (EC 0x25, DFSC 0x10, FAR 0xe000000), taken at EL1 because `SCR_EL3.EA` = 0. The NS address space simply has no Secure RAM in it (`info mtree`).
+- `SCR_EL3.SIF` is left 0 because the Secure EL1 run executes from NS RAM; real firmware sets SIF=1.
+- After copying code, `dsb; ic iallu; dsb; isb` so no stale instructions are fetched (no effect in QEMU, required on hardware with caches on).
+- No EL2 on QEMU `virt` without `virtualization=on`, so EL3 goes straight to EL1.
 
 ### Bugs and debugging
 | Symptom | Cause | How it was found |
 |---------|-------|------------------|
-| | | |
+| `NULL undeclared` in `payload/main.c` | missing `<stddef.h>` | build error |
+| (design) `hlt #0xf000` would be UNDEF without `-semihosting` and trigger a panic | every QEMU command line must enable semihosting | moved the QEMU command into `scripts/lib.sh` |
 
 ### Verification
--
+- `make test`: A1–A4 PASS. `test_a4.sh` checks both runs line by line, `el1_vectors` 2KB alignment, and no panic.
+- Break tests: `SCR_NS` never set → all `[NS]` lines missing (the payload keeps running Secure); `tf->elr += 4` after SMC → SMC results wrong from the first call.
 
 ---
 

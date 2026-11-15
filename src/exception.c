@@ -1,3 +1,4 @@
+#include "el3.h"
 #include "exception.h"
 #include "printf.h"
 #include "sysreg.h"
@@ -19,8 +20,9 @@ static struct fault_record *expected;
 
 void expect_fault(struct fault_record *rec)
 {
-    rec->taken = 0;
-    expected = rec;
+    if (rec != NULL)
+        rec->taken = 0;
+    expected = rec;     /* NULL disarms */
 }
 
 static const char *ec_name(uint64_t ec)
@@ -64,6 +66,11 @@ void el3_exception_handler(uint64_t vec, struct trap_frame *tf)
         expected->taken = 1;
         expected = NULL;
         tf->elr += 4;   /* skip the faulting instruction (all A64 insns are 4 bytes) */
+        return;
+    }
+    /* A4: smc from a lower EL (Secure or Non-secure EL1). */
+    if (vec == VEC_LOW64_SYNC && ESR_EC(esr) == EC_SMC64) {
+        el3_smc_handler(tf);
         return;
     }
     panic(vec, tf, esr, far);
