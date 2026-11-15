@@ -1,0 +1,44 @@
+#!/usr/bin/expect -f
+# Drive one boot of the stack: wait for the login prompt, run the xtest smoke
+# set, power off. Everything on the console is logged to $BIN/console.log;
+# test_b1.sh checks that log afterwards.
+#
+# Env: BIN (out/bin), QEMU_FLAGS, XTEST_ARGS.
+
+set timeout 300
+log_user 1
+log_file -noappend "$env(BIN)/console.log"
+
+proc fail {msg} {
+    puts "\nB1: FAIL $msg"
+    exit 1
+}
+
+spawn sh -c "cd '$env(BIN)' && exec qemu-system-aarch64 $env(QEMU_FLAGS)"
+
+expect {
+    "login:" {}
+    timeout  { fail "timeout waiting for the login prompt" }
+    eof      { fail "QEMU exited before the login prompt" }
+}
+send "root\r"
+expect {
+    "# " {}
+    timeout { fail "no shell prompt after login" }
+}
+
+send "xtest $env(XTEST_ARGS)\r"
+expect {
+    -re {test cases of which [0-9]+ failed} {}
+    timeout { fail "xtest did not finish" }
+}
+expect "# "
+
+# poweroff -> Linux PSCI SYSTEM_OFF (an SMC to BL31) -> QEMU exits.
+send "poweroff\r"
+set timeout 120
+expect {
+    eof {}
+    timeout { fail "QEMU did not exit after poweroff (PSCI SYSTEM_OFF)" }
+}
+exit 0
