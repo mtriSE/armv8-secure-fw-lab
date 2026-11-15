@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Run a command inside the Part B build container, e.g.
+#   ./bsp/dock make -C bsp           # build the whole stack
+#   ./bsp/dock make -C bsp run       # boot it on QEMU
+#   ./bsp/dock bash                  # interactive shell
+#
+# The image tag is derived from the Dockerfile contents, so editing the
+# Dockerfile automatically builds a new image on the next call.
+# The repository is mounted at the same path as on the host, and the command
+# runs as the host user, so build output is owned by you and paths printed by
+# the tools (and debug info) are valid on the host too.
+# --network host: QEMU's gdbstub (port 1234) is reachable from a host GDB.
+set -euo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+dockerfile="$repo/bsp/docker/Dockerfile"
+image="armv8-secure-fw-lab-bsp:$(sha256sum "$dockerfile" | cut -c1-12)"
+
+if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "dock: building image $image" >&2
+    docker build -t "$image" -f "$dockerfile" "$repo/bsp/docker"
+fi
+
+case "$PWD/" in
+    "$repo"/*) ;;
+    *) echo "dock: run this from inside $repo" >&2; exit 1 ;;
+esac
+
+tty=()
+[ -t 0 ] && [ -t 1 ] && tty=(-it)
+
+home="$repo/bsp/out/home"
+mkdir -p "$home"
+
+exec docker run --rm "${tty[@]}" \
+    --network host \
+    -v "$repo:$repo" -w "$PWD" \
+    -u "$(id -u):$(id -g)" -e HOME="$home" \
+    -e JOBS="${JOBS:-}" \
+    "$image" "${@:-bash}"
