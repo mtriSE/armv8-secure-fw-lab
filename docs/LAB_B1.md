@@ -9,7 +9,7 @@ Code của B1 đã có sẵn và đã chạy được (`./bsp/dock make -C bsp t
 3. Dùng GDB theo dõi CPU đi qua BL1 → BL2 → BL31 → OP-TEE → U-Boot, và xem `SCR_EL3` thay đổi ra sao. Đây là phiên bản thật của thứ bạn đã tự viết ở A4.
 4. Cố ý làm hỏng hệ thống, **dự đoán trước** chuyện gì sẽ xảy ra, rồi kiểm chứng.
 
-Đọc `docs/B1_KNOWLEDGE.md` trước (ít nhất các mục 1–4). Lab sẽ nhắc lại mục tương ứng ở từng bước.
+Đọc `docs/B1_KNOWLEDGE.md` trước (ít nhất các mục 1–3). Lab sẽ nhắc lại mục tương ứng ở từng bước.
 
 Thời gian ước tính: 4 – 6 giờ, không tính lần build đầu tiên. Như các lab trước, mỗi bước có **Làm**, **Kiểm tra** và **Câu hỏi**. Với các thí nghiệm, có thêm **Dự đoán**: viết dự đoán ra **trước khi** chạy. Đáp án ghi vào `docs/NOTES.md`, mục `B1: lab answers` (bạn tự tạo mục này).
 
@@ -62,7 +62,7 @@ $ git submodule status
 $ git -C third_party/trusted-firmware-a submodule status
 $ cat .gitmodules | head -12
 ```
-Tiếp theo, tự tái hiện lỗi CI về version string (mục 7.1 trong KNOWLEDGE): clone một bản **không có tag** của `optee_os` rồi so sánh.
+Tiếp theo, tự tái hiện lỗi CI về version string (KNOWLEDGE mục 6, bài học 1): clone một bản **không có tag** của `optee_os` rồi so sánh.
 ```sh
 $ git -C third_party/optee_os describe --always
 $ git clone -q --depth 1 --no-tags file://$PWD/third_party/optee_os /tmp/optee-notag
@@ -85,7 +85,7 @@ $ rm -rf /tmp/optee-notag
 
 ## Bước 2: Tự build OP-TEE
 
-Xem KNOWLEDGE mục 2 (OP-TEE) và 3.2 (header, pager).
+Xem KNOWLEDGE mục 2.2 (header, pager) và 5 (TA dev kit).
 
 **Làm**: build bằng tay vào `bsp/out/lab/optee_os` (khoảng 30 giây):
 ```sh
@@ -197,7 +197,7 @@ Non-Trusted Firmware BL33: offset=0x9702B, size=0x1707A0, cmdline="--nt-fw"
 
 ## Bước 5: Chạy QEMU bằng tay và đọc log
 
-Xem KNOWLEDGE mục 3.1–3.3 và 4.
+Xem KNOWLEDGE mục 2.1–2.5 và 4.
 
 **Làm**: chạy đúng như `make -C bsp run`, nhưng tự gõ lệnh (`bsp/out/bin` chứa các symlink do `make -C bsp` tạo):
 ```sh
@@ -251,7 +251,7 @@ Tiếp theo, boot bằng ảnh flash có FIP do bạn build ở bước 4:
 
 ## Bước 6: GDB qua từng tầng boot
 
-Xem KNOWLEDGE mục 3.4. Đây là phiên bản thật của A4: cùng các thanh ghi `SCR_EL3`, `SPSR_EL3`, `ELR_EL3`, nhưng do TF-A điều khiển.
+Xem KNOWLEDGE mục 2.8. Đây là phiên bản thật của A4: cùng các thanh ghi `SCR_EL3`, `SPSR_EL3`, `ELR_EL3`, nhưng do TF-A điều khiển.
 
 **Làm**
 
@@ -287,7 +287,7 @@ Lặp lại `continue` / `els` cho tới khi dừng ở `0x60000000`. Tại mỗ
 
 Các dòng `warning: (Internal error: pc 0x0 in read in CU, but not in symtab.)` là vô hại: GDB đang tra symbol cho pc = 0 trong 3 file ELF nạp chồng lên nhau.
 
-**Kiểm tra**: bạn phải thấy được bảng giống mục 3.4 của KNOWLEDGE:
+**Kiểm tra**: bạn phải thấy được bảng giống mục 2.8 của KNOWLEDGE:
 ```
 pc=0x0        cpsr=0x400003cd EL=3 SCR_EL3=0x30
 pc=0x210      cpsr=0x600002cc EL=3 SCR_EL3=0x238     bl1_main
@@ -312,7 +312,7 @@ pc=0x60000000 cpsr=0x3c5      EL=1 SCR_EL3=0x635     U-Boot
 
 ## Bước 7: Khám phá phía Linux
 
-Xem KNOWLEDGE mục 2 (`tee-supplicant`), 3.5 và 5.
+Xem KNOWLEDGE mục 2.6, 2.7 và 3.
 
 **Làm**: boot (`./bsp/dock make -C bsp run`), đăng nhập `root`, rồi chạy:
 ```sh
@@ -379,7 +379,7 @@ sleep 10; tail -3 /tmp/x.log; ps | grep [x]test
 
 **Kiểm tra**: sau lần `sleep` đầu, `xtest` **vẫn đang chạy** và dừng ở `* regression_1004 Test User Crypt TA`. Sau khi bật supplicant, nó chạy xong: `1 test case of which 0 failed`.
 
-**Câu hỏi**: vì sao nó treo mà không fail? OP-TEE đang chờ cái gì, và chờ ở đâu (S-EL1, hay trong driver Linux)? Vẽ lại đường RPC ở KNOWLEDGE mục 5.
+**Câu hỏi**: vì sao nó treo mà không fail? OP-TEE đang chờ cái gì, và chờ ở đâu (S-EL1, hay trong driver Linux)? Vẽ lại đường RPC ở KNOWLEDGE mục 3.
 
 ### 8b. Thiếu image BL32
 **Dự đoán**: xóa `bl32.bin` (header OP-TEE). Boot dừng ở đâu, tầng nào báo lỗi?
@@ -465,4 +465,4 @@ Với `0x42200000`, Linux boot bình thường.
 
 - Mục `B1: lab answers` trong `docs/NOTES.md` có đáp án cho mọi câu hỏi và dự đoán của bước 8 (kể cả dự đoán sai, và vì sao sai).
 - Không còn file nào bị sửa: `git status` sạch, chỉ trừ `docs/NOTES.md`. `bsp/out/lab/` có thể xóa.
-- Bạn tự giải thích được (không nhìn tài liệu): boot flow ở KNOWLEDGE mục 3, bảng địa chỉ ở mục 4, và đường đi của một lệnh gọi TEE ở mục 5. Đây là nền cho B2 (trace PSCI bằng GDB) và B3 (thêm SMC service của bạn vào BL31).
+- Bạn tự giải thích được (không nhìn tài liệu): boot flow ở KNOWLEDGE mục 2, bảng địa chỉ ở mục 4, và đường đi của một lệnh gọi TEE ở mục 3. Đây là nền cho B2 (trace PSCI bằng GDB) và B3 (thêm SMC service của bạn vào BL31).
