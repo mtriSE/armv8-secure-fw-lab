@@ -25,8 +25,9 @@ PL_OBJS   := $(patsubst payload/%.c,$(PL_BUILD)/%.o,$(wildcard payload/*.c)) \
 
 QEMU       := qemu-system-aarch64
 # -semihosting: the firmware stops QEMU itself when the run is over (src/semihost.c).
+# -nic none: no network card (the default one needs the ipxe-qemu option ROM).
 QEMU_FLAGS := -M virt,secure=on,gic-version=3 -cpu cortex-a53 -m 256M -nographic -semihosting \
-              -bios $(BUILD)/firmware.bin
+              -nic none -bios $(BUILD)/firmware.bin
 
 .PHONY: all run debug test clean dis dis-payload
 all: $(BUILD)/firmware.elf $(BUILD)/firmware.bin

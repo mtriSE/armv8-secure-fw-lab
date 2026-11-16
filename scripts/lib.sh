@@ -5,10 +5,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 # Run the firmware once and print its UART output (CR stripped). The firmware
 # ends the run itself through semihosting; timeout only guards against hangs.
+# QEMU's own errors (stderr) are kept, so a QEMU that cannot start shows why
+# in the failure dump instead of an empty output.
+# -nic none: no network card; the default virtio NIC needs an iPXE option ROM
+# (package ipxe-qemu), which minimal installs such as CI do not have.
 run_firmware() {
     timeout 10 qemu-system-aarch64 -M virt,secure=on,gic-version=3 -cpu cortex-a53 \
-        -m 256M -display none -serial stdio -monitor none -semihosting \
-        -bios build/firmware.bin </dev/null 2>/dev/null | tr -d '\r'
+        -m 256M -display none -serial stdio -monitor none -semihosting -nic none \
+        -bios build/firmware.bin </dev/null 2>&1 | tr -d '\r'
 }
 
 # Address of a firmware/payload symbol without leading zeros: sym_addr ELF NAME
